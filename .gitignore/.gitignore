@@ -1,0 +1,87 @@
+
+//Переходим в контакты для начала
+
+Tab Tab1 = instance.ActiveTab;
+Tab1.Navigate("https://www.linkedin.com/mynetwork/invite-connect/connections/");
+Tab1.WaitDownloading();
+
+List<string> lstTemp = new List<string>();
+
+int intColPars = Convert.ToInt32(project.Variables["skolko_parsit"].Value);
+int intResult = intColPars / 35;
+
+IZennoTable tblResult = project.Tables["parsing_db"];
+IZennoList lstDb = project.Lists["db"];
+
+string strLogin = project.Variables["login"].Value;
+string strLinkPeople = string.Empty;
+
+for (int i=0; i<intResult; i++) {
+	instance.WaitFieldEmulationDelay();
+	// Эмулировать ввод текста
+	instance.SendText("{END}", 15);
+	Thread.Sleep(3000);
+}
+
+HtmlElementCollection colUsers = Tab1.FindElementsByXPath("//a[contains(@class, 'link ember')]");
+foreach(HtmlElement elUserLink in colUsers) {
+	strLinkPeople = elUserLink.GetAttribute("href");
+	if (strLinkPeople!=string.Empty) lstTemp.Add(strLinkPeople);
+}
+project.SendInfoToLog(string.Format("Спарсили {0} человек",lstTemp.Count));
+
+//Чищу список от уже отработанных контактов
+foreach (string strLink in lstDb) {
+	if (lstTemp.Contains(strLink)) lstTemp.Remove(strLink);
+	if (lstTemp.Count==0) return "oki";
+}
+project.SendInfoToLog(string.Format("Осталось ссылок {0} ",lstTemp.Count));
+//if (lstTemp.Count<intColPars) continue;
+
+for (int m=0; m<lstTemp.Count; m++) {
+	if (m==intColPars) {
+		project.SendInfoToLog(string.Format("Успешно завершили парсинг. Спарсилось {0} человек", m),true);
+		project.Profile.Save(project.Directory + @"\LinkedIn\Cookie\" + strLogin + ".zpprofile", true, true, true, true, true); //сохранить профиль
+		return "Oki";
+	}
+	if (lstTemp.Count==0) {
+		project.SendInfoToLog("Успешно завершили парсинг, ссылки на людей закончились");
+		project.Profile.Save(project.Directory + @"\LinkedIn\Cookie\" + strLogin + ".zpprofile", true, true, true, true, true); //сохранить профиль
+		return "Oki";
+	}
+	strLinkPeople = lstTemp[0];
+	lstTemp.RemoveAt(0);
+	Tab1.Navigate(strLinkPeople);
+	Tab1.WaitDownloading();
+	
+	string strName = Tab1.FindElementByXPath("//h1[contains(@class, 'name')]",0).InnerHtml;
+	string strWorkNow = Tab1.FindElementByXPath("//h2[contains(@class, 'pv-top-card-section')]",0).InnerHtml;
+	string strLocLive = Tab1.FindElementByXPath("//h3[contains(@class, 'pv-top-card-section__location')]",0).InnerHtml;
+	string strSlogan = Tab1.FindElementByXPath("//span[contains(@class, 'truncate')]/span",0).InnerHtml;
+	string strWork = Tab1.FindElementByXPath("//h3[contains(@class, 'company')]",0).InnerText;
+	string strWorkTrim = strWork.Trim();
+	string strEdu = Tab1.FindElementByXPath("//h3[contains(@class, 'school pv-top-card-section__school')]",0).InnerText;
+	string strEduTrim = strEdu.Trim();
+	Tab1.FindElementByXPath("//button[contains(@class, 'contact-see-more-less link-without-visited-state')]/span[1]",0).Click();
+	Thread.Sleep(2000);
+	string strEmail = Tab1.FindElementByXPath("//section[contains(@class, 'email')]/div[contains(@class, 'container')]/a[contains(@class, 'info__contact-link')]",0).InnerText;
+	string strEmailTrim = strEmail.Trim();
+	string strLinkProfile = strLinkPeople;
+	string strTel = Tab1.FindElementByXPath("//div[contains(@class, 'pv-contact-info__contact-item')]/a[contains(@class, 'pv-contact-info__contact-link')]",0).InnerText;
+	string strTelTrim = strTel.Trim();
+	string strBirthday = Tab1.FindElementByXPath("//section[contains(@class, 'birthday')]/div/span",0).InnerHtml;
+	string strBirthdayTrim = strBirthday.Trim();
+	string strSkolkoContacts = Tab1.FindElementByXPath("//h3[contains(@class,'pv-top-card-section__connections')]/span[1]",0).InnerHtml;
+	lock (SyncObjects.TableSyncer) {
+		tblResult.AddRow(new String[]{strName, strWorkNow, strLocLive, strSlogan, strWorkTrim, strEduTrim, strEmailTrim, strTelTrim, strLinkProfile, strBirthdayTrim, strSkolkoContacts});
+	}
+	lock (SyncObjects.ListSyncer) {
+		lstDb.Add(strLinkPeople);
+	}
+}
+lock (SyncObjects.ListSyncer) {
+	List<string> lstDistinct = lstDb.Distinct().ToList(); //уникализируем значения во временном списке
+	lstDb.Clear(); //очищаем исходный список
+	lstDb.AddRange(lstDistinct); //помещаем уникализированные данные в исходный список
+}
+project.Profile.Save(project.Directory + @"\LinkedIn\Cookie\" + strLogin + ".zpprofile", true, true, true, true, true); //сохранить профиль
